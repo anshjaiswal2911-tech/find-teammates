@@ -33,31 +33,33 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
+import { dbService } from '../lib/dbService';
+import { Event as AppEvent } from '../lib/types';
 
-interface OrganizerEvent {
-  id: string;
-  title: string;
-  type: 'Hackathon' | 'Workshop' | 'Webinar' | 'Conference';
-  date: string;
-  endDate: string;
-  location: string;
-  mode: 'Online' | 'Offline' | 'Hybrid';
-  prize: string;
-  description: string;
-  tags: string[];
-  status: 'Draft' | 'Published' | 'Ongoing' | 'Completed';
-  difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
-  maxParticipants: number;
-  registrations: number;
-  interested: number;
-  views: number;
-  organizer: string;
-  publishedDate?: string;
-  teamSize: number;
-  teamMembers: string[];
-}
+// Using AppEvent from types.ts
 
-const mockOrganizerEvents: OrganizerEvent[] = [
+const mockOrganizerEvents: AppEvent[] = [
+  {
+    id: '1',
+    title: 'Global AI Hackathon 2026',
+    type: 'Hackathon',
+    date: '2026-04-15',
+    endDate: '2026-04-17',
+    location: 'San Francisco, CA',
+    mode: 'Hybrid',
+    prize: '$50,000',
+    description: 'Join the world\'s largest AI hackathon focusing on sustainable AI solutions.',
+    tags: ['AI', 'Sustainability', 'Python'],
+    status: 'Published',
+    difficulty: 'Advanced',
+    maxParticipants: 500,
+    registrations: 385,
+    interested: 1250,
+    views: 5400,
+    organizer: 'AI Global Research',
+    teamSize: 4,
+    teamMembers: ['Alex Reed', 'Sarah Chen', 'Mike Ross'],
+  },
   {
     id: 'org-1',
     title: 'DevFest 2026',
@@ -126,31 +128,31 @@ const mockOrganizerEvents: OrganizerEvent[] = [
 ];
 
 export function EventOrganizer() {
-  // Load events from localStorage on mount
-  const [events, setEvents] = useState<OrganizerEvent[]>(() => {
-    const savedEvents = localStorage.getItem('organizerEvents');
-    return savedEvents ? JSON.parse(savedEvents) : mockOrganizerEvents;
-  });
+  const [events, setEvents] = useState<AppEvent[]>([]);
+  const [loading, setLoading] = useState(true);
   
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [selectedEvent, setSelectedEvent] = useState<OrganizerEvent | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<AppEvent | null>(null);
   const [showAnalytics, setShowAnalytics] = useState<string | null>(null);
   const [showParticipants, setShowParticipants] = useState<string | null>(null);
   const [showNotification, setShowNotification] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<OrganizerEvent | null>(null);
+  const [editingEvent, setEditingEvent] = useState<AppEvent | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [sharingEvent, setSharingEvent] = useState<OrganizerEvent | null>(null);
+  const [sharingEvent, setSharingEvent] = useState<AppEvent | null>(null);
 
-  // Save events to localStorage whenever they change
+  const loadEvents = async () => {
+    setLoading(true);
+    const data = await dbService.getEvents();
+    setEvents(data.length > 0 ? data : mockOrganizerEvents);
+    setLoading(false);
+  };
+
   useEffect(() => {
-    localStorage.setItem('organizerEvents', JSON.stringify(events));
-    // Dispatch custom event for same-tab updates
-    window.dispatchEvent(new Event('eventsUpdated'));
-  }, [events]);
+    loadEvents();
+  }, []);
 
-  // Form state for creating/editing events
   const [formData, setFormData] = useState({
     title: '',
     type: 'Hackathon' as 'Hackathon' | 'Workshop' | 'Webinar' | 'Conference',
@@ -162,104 +164,136 @@ export function EventOrganizer() {
     description: '',
     tags: '',
     difficulty: 'Beginner' as 'Beginner' | 'Intermediate' | 'Advanced',
+    status: 'Draft' as 'Draft' | 'Published' | 'Ongoing' | 'Completed',
     maxParticipants: 100,
     teamSize: 1,
     teamMembers: '',
   });
 
-  const handleCreateEvent = (e: React.FormEvent) => {
+  const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const newEvent: OrganizerEvent = {
-      id: Date.now().toString(),
-      ...formData,
-      tags: formData.tags.split(',').map(tag => tag.trim()),
+    const newEventData: Partial<AppEvent> = {
+      title: formData.title,
+      type: formData.type,
+      date: formData.date,
+      endDate: formData.endDate,
+      location: formData.location,
+      mode: formData.mode,
+      prize: formData.prize,
+      description: formData.description,
+      difficulty: formData.difficulty,
+      maxParticipants: formData.maxParticipants,
+      teamSize: formData.teamSize,
+      tags: formData.tags.split(',').map(tag => tag.trim()).filter(t => t),
+      teamMembers: formData.teamMembers.split(',').map(member => member.trim()).filter(m => m),
       status: 'Draft',
-      registrations: 0,
-      interested: 0,
-      views: 0,
-      organizer: 'Your Organization',
-      teamMembers: formData.teamMembers.split(',').map(member => member.trim()),
     };
 
-    setEvents([newEvent, ...events]);
-    setShowCreateModal(false);
-    resetForm();
-    showNotificationMessage('Event created successfully! You can now publish it.');
-  };
-
-  const handlePublishEvent = (eventId: string) => {
-    setEvents(events.map(event =>
-      event.id === eventId
-        ? { ...event, status: 'Published' as const, publishedDate: new Date().toISOString() }
-        : event
-    ));
-    showNotificationMessage('Event published successfully!');
-  };
-
-  const handleDeleteEvent = (eventId: string) => {
-    if (confirm('Are you sure you want to delete this event?')) {
-      setEvents(events.filter(event => event.id !== eventId));
-      showNotificationMessage('Event deleted successfully!');
+    const created = await dbService.createEvent(newEventData);
+    if (created) {
+      setEvents([created, ...events]);
+      setShowCreateModal(false);
+      resetForm();
+      showNotificationMessage('Event created successfully! You can now publish it.');
+    } else {
+      showNotificationMessage('Failed to create event. Please try again.');
     }
   };
 
-  const handleEditEvent = (event: OrganizerEvent) => {
+  const handlePublishEvent = async (eventId: string) => {
+    const success = await dbService.updateEvent(eventId, {
+      status: 'Published',
+      publishedDate: new Date().toISOString()
+    });
+
+    if (success) {
+      setEvents(events.map(event =>
+        event.id === eventId
+          ? { ...event, status: 'Published' as const, publishedDate: new Date().toISOString() }
+          : event
+      ));
+      showNotificationMessage('Event published successfully!');
+    }
+  };
+
+  const handleDeleteEvent = async (eventId: string) => {
+    if (confirm('Are you sure you want to delete this event?')) {
+      const success = await dbService.deleteEvent(eventId);
+      if (success) {
+        setEvents(events.filter(event => event.id !== eventId));
+        showNotificationMessage('Event deleted successfully!');
+      }
+    }
+  };
+
+  const handleEditEvent = (event: AppEvent) => {
     setEditingEvent(event);
     setFormData({
       title: event.title,
       type: event.type,
       date: event.date,
-      endDate: event.endDate,
+      endDate: event.endDate ?? '',
       location: event.location,
       mode: event.mode,
       prize: event.prize,
       description: event.description,
-      tags: event.tags.join(', '),
+      tags: (event.tags || []).join(', '),
       difficulty: event.difficulty,
-      maxParticipants: event.maxParticipants,
-      teamSize: event.teamSize,
-      teamMembers: event.teamMembers.join(', '),
+      status: event.status || 'Draft',
+      maxParticipants: event.maxParticipants ?? 100,
+      teamSize: event.teamSize ?? 1,
+      teamMembers: (event.teamMembers || []).join(', '),
     });
     setShowEditModal(true);
   };
 
-  const handleUpdateEvent = (e: React.FormEvent) => {
+  const handleUpdateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingEvent) return;
 
-    const updatedEvent: OrganizerEvent = {
-      ...editingEvent,
-      ...formData,
-      tags: formData.tags.split(',').map(tag => tag.trim()),
+    const updatedData: Partial<AppEvent> = {
+      title: formData.title,
+      type: formData.type,
+      date: formData.date,
+      endDate: formData.endDate,
+      location: formData.location,
+      mode: formData.mode,
+      prize: formData.prize,
+      description: formData.description,
+      difficulty: formData.difficulty,
+      maxParticipants: formData.maxParticipants,
+      teamSize: formData.teamSize,
+      tags: formData.tags.split(',').map(tag => tag.trim()).filter(t => t),
       teamMembers: formData.teamMembers.split(',').map(member => member.trim()).filter(m => m),
     };
 
-    setEvents(events.map(event =>
-      event.id === editingEvent.id ? updatedEvent : event
-    ));
-    
-    setShowEditModal(false);
-    setEditingEvent(null);
-    resetForm();
-    showNotificationMessage('Event updated successfully!');
+    const success = await dbService.updateEvent(editingEvent.id, updatedData);
+    if (success) {
+      setEvents(events.map(event =>
+        event.id === editingEvent.id ? { ...editingEvent, ...updatedData } as AppEvent : event
+      ));
+      
+      setShowEditModal(false);
+      setEditingEvent(null);
+      resetForm();
+      showNotificationMessage('Event updated successfully!');
+    }
   };
 
-  const handleShareEvent = (event: OrganizerEvent) => {
+  const handleShareEvent = (event: AppEvent) => {
     setSharingEvent(event);
     setShowShareModal(true);
   };
 
   const copyToClipboard = async (text: string) => {
     try {
-      // Modern Clipboard API
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
         showNotificationMessage('Event link copied to clipboard! 📋');
         return true;
       }
       
-      // Fallback for older browsers
       const textarea = document.createElement('textarea');
       textarea.value = text;
       textarea.style.position = 'fixed';
@@ -342,6 +376,7 @@ export function EventOrganizer() {
       description: '',
       tags: '',
       difficulty: 'Beginner',
+      status: 'Draft',
       maxParticipants: 100,
       teamSize: 1,
       teamMembers: '',
@@ -354,20 +389,18 @@ export function EventOrganizer() {
     setTimeout(() => setShowNotification(false), 4000);
   };
 
-  // Calculate statistics
   const totalEvents = events.length;
   const publishedEvents = events.filter(e => e.status === 'Published').length;
-  const totalRegistrations = events.reduce((sum, e) => sum + e.registrations, 0);
-  const totalInterested = events.reduce((sum, e) => sum + e.interested, 0);
-  const totalViews = events.reduce((sum, e) => sum + e.views, 0);
+  const totalRegistrations = events.reduce((sum, e) => sum + (e.registrations || 0), 0);
+  const totalInterested = events.reduce((sum, e) => sum + (e.interested || 0), 0);
+  const totalViews = events.reduce((sum, e) => sum + (e.views || 0), 0);
 
-  // Chart data
   const registrationData = events
     .filter(e => e.status === 'Published')
     .map(e => ({
       name: e.title.length > 20 ? e.title.substring(0, 20) + '...' : e.title,
-      registrations: e.registrations,
-      interested: e.interested,
+      registrations: e.registrations || 0,
+      interested: e.interested || 0,
     }));
 
   const statusData = [
@@ -395,7 +428,6 @@ export function EventOrganizer() {
         </p>
       </div>
 
-      {/* Stats Overview */}
       <div className="grid gap-4 md:grid-cols-5 mb-6">
         <Card className="border-2 border-blue-200 bg-blue-50">
           <CardContent className="p-4">
@@ -458,7 +490,6 @@ export function EventOrganizer() {
         </Card>
       </div>
 
-      {/* Analytics Charts */}
       <div className="grid md:grid-cols-2 gap-6 mb-6">
         <Card>
           <CardHeader>
@@ -518,7 +549,6 @@ export function EventOrganizer() {
         </Card>
       </div>
 
-      {/* Events List */}
       <Card>
         <CardHeader>
           <CardTitle>Your Events</CardTitle>
@@ -568,11 +598,10 @@ export function EventOrganizer() {
                       </div>
                       <div className="flex items-center gap-2 text-sm text-gray-600">
                         <Eye className="h-4 w-4 text-purple-600" />
-                        <span>{event.views} views</span>
+                        <span>{event.views || 0} views</span>
                       </div>
                     </div>
 
-                    {/* Team Info */}
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-medium text-gray-700">Team Configuration</span>
@@ -582,7 +611,7 @@ export function EventOrganizer() {
                         </Badge>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {event.teamMembers.map((member, idx) => (
+                        {event.teamMembers?.map((member, idx) => (
                           <Badge key={idx} variant="outline" className="text-xs">
                             {member}
                           </Badge>
@@ -590,7 +619,6 @@ export function EventOrganizer() {
                       </div>
                     </div>
 
-                    {/* Event Stats */}
                     {event.status === 'Published' && (
                       <div className="grid grid-cols-3 gap-4 bg-gray-50 rounded-lg p-4">
                         <div>
@@ -599,17 +627,17 @@ export function EventOrganizer() {
                             onClick={() => setShowParticipants(event.id)}
                             className="flex items-baseline gap-2 hover:opacity-80 transition-opacity cursor-pointer group"
                           >
-                            <span className="text-2xl font-bold text-gray-900 group-hover:text-purple-600 transition-colors">{event.registrations}</span>
-                            <span className="text-sm text-gray-500">/ {event.maxParticipants}</span>
+                            <span className="text-2xl font-bold text-gray-900 group-hover:text-purple-600 transition-colors">{event.registrations || 0}</span>
+                            <span className="text-sm text-gray-500">/ {event.maxParticipants || 0}</span>
                             <Users className="h-4 w-4 text-purple-600 opacity-0 group-hover:opacity-100 transition-opacity" />
                           </button>
                           <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
                             <div
                               className="bg-purple-600 h-2 rounded-full"
-                              style={{ width: `${(event.registrations / event.maxParticipants) * 100}%` }}
+                              style={{ width: `${((event.registrations || 0) / (event.maxParticipants || 1)) * 100}%` }}
                             />
                           </div>
-                          {event.registrations > 0 && (
+                          {(event.registrations || 0) > 0 && (
                             <div className="text-xs text-purple-600 mt-1 cursor-pointer hover:underline" onClick={() => setShowParticipants(event.id)}>
                               Click to view participants
                             </div>
@@ -618,16 +646,16 @@ export function EventOrganizer() {
 
                         <div>
                           <div className="text-sm text-gray-600 mb-1">Interested</div>
-                          <div className="text-2xl font-bold text-orange-600">{event.interested}</div>
+                          <div className="text-2xl font-bold text-orange-600">{event.interested || 0}</div>
                           <div className="text-xs text-gray-500 mt-2">
-                            {event.interested > 0 ? `${((event.registrations / event.interested) * 100).toFixed(1)}% conversion` : 'No interest yet'}
+                            {(event.interested || 0) > 0 ? `${(((event.registrations || 0) / (event.interested || 1)) * 100).toFixed(1)}% conversion` : 'No interest yet'}
                           </div>
                         </div>
 
                         <div>
                           <div className="text-sm text-gray-600 mb-1">Engagement</div>
                           <div className="text-2xl font-bold text-blue-600">
-                            {event.views > 0 ? `${((event.registrations / event.views) * 100).toFixed(1)}%` : '0%'}
+                            {(event.views || 0) > 0 ? `${(((event.registrations || 0) / (event.views || 1)) * 100).toFixed(1)}%` : '0%'}
                           </div>
                           <div className="text-xs text-gray-500 mt-2">Click-through rate</div>
                         </div>
@@ -636,7 +664,6 @@ export function EventOrganizer() {
                   </div>
                 </div>
 
-                {/* Actions */}
                 <div className="flex gap-2 flex-wrap">
                   {event.status === 'Draft' && (
                     <Button
@@ -688,7 +715,6 @@ export function EventOrganizer() {
         </CardContent>
       </Card>
 
-      {/* Create Event Modal */}
       <AnimatePresence>
         {showCreateModal && (
           <motion.div
@@ -932,7 +958,6 @@ export function EventOrganizer() {
         )}
       </AnimatePresence>
 
-      {/* Edit Event Modal */}
       <AnimatePresence>
         {showEditModal && editingEvent && (
           <motion.div
@@ -1189,7 +1214,6 @@ export function EventOrganizer() {
         )}
       </AnimatePresence>
 
-      {/* Share Event Modal */}
       <AnimatePresence>
         {showShareModal && sharingEvent && (
           <motion.div
@@ -1227,7 +1251,6 @@ export function EventOrganizer() {
               </div>
 
               <div className="p-6 space-y-4">
-                {/* Copy Link */}
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-700">Event Link</span>
@@ -1246,11 +1269,9 @@ export function EventOrganizer() {
                   </p>
                 </div>
 
-                {/* Share via Social Media */}
                 <div>
                   <h3 className="text-sm font-medium text-gray-700 mb-3">Share via</h3>
                   <div className="grid grid-cols-3 gap-3">
-                    {/* WhatsApp */}
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
@@ -1265,7 +1286,6 @@ export function EventOrganizer() {
                       <span className="text-xs font-medium text-gray-700 group-hover:text-green-600">WhatsApp</span>
                     </motion.button>
 
-                    {/* Twitter */}
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
@@ -1280,7 +1300,6 @@ export function EventOrganizer() {
                       <span className="text-xs font-medium text-gray-700 group-hover:text-blue-600">Twitter</span>
                     </motion.button>
 
-                    {/* LinkedIn */}
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
@@ -1295,7 +1314,6 @@ export function EventOrganizer() {
                       <span className="text-xs font-medium text-gray-700 group-hover:text-blue-700">LinkedIn</span>
                     </motion.button>
 
-                    {/* Facebook */}
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
@@ -1310,7 +1328,6 @@ export function EventOrganizer() {
                       <span className="text-xs font-medium text-gray-700 group-hover:text-blue-600">Facebook</span>
                     </motion.button>
 
-                    {/* Telegram */}
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
@@ -1325,7 +1342,6 @@ export function EventOrganizer() {
                       <span className="text-xs font-medium text-gray-700 group-hover:text-blue-500">Telegram</span>
                     </motion.button>
 
-                    {/* Email */}
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
@@ -1340,7 +1356,6 @@ export function EventOrganizer() {
                   </div>
                 </div>
 
-                {/* Event Preview */}
                 <div className="bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4">
                   <div className="flex items-start gap-3">
                     <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center flex-shrink-0">
@@ -1375,25 +1390,22 @@ export function EventOrganizer() {
         )}
       </AnimatePresence>
 
-      {/* Analytics Modal */}
       <AnimatePresence>
         {showAnalytics && (() => {
           const event = events.find(e => e.id === showAnalytics);
           if (!event) return null;
 
-          // Generate daily registration data for last 7 days
           const dailyData = Array.from({ length: 7 }, (_, i) => ({
             day: new Date(Date.now() - (6 - i) * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { weekday: 'short' }),
-            registrations: Math.floor(event.registrations * Math.random() * 0.3),
-            views: Math.floor(event.views * Math.random() * 0.3),
+            registrations: Math.floor((event.registrations || 0) * Math.random() * 0.3),
+            views: Math.floor((event.views || 0) * Math.random() * 0.3),
           }));
 
-          // Source distribution
           const sourceData = [
-            { name: 'Direct', value: Math.floor(event.registrations * 0.4), color: '#3B82F6' },
-            { name: 'Social Media', value: Math.floor(event.registrations * 0.35), color: '#8B5CF6' },
-            { name: 'Referrals', value: Math.floor(event.registrations * 0.15), color: '#10B981' },
-            { name: 'Email', value: Math.floor(event.registrations * 0.1), color: '#F59E0B' },
+            { name: 'Direct', value: Math.floor((event.registrations || 0) * 0.4), color: '#3B82F6' },
+            { name: 'Social Media', value: Math.floor((event.registrations || 0) * 0.35), color: '#8B5CF6' },
+            { name: 'Referrals', value: Math.floor((event.registrations || 0) * 0.15), color: '#10B981' },
+            { name: 'Email', value: Math.floor((event.registrations || 0) * 0.1), color: '#F59E0B' },
           ];
 
           return (
@@ -1422,7 +1434,6 @@ export function EventOrganizer() {
                 </div>
 
                 <div className="p-6 space-y-6">
-                  {/* Key Metrics */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <Card className="border-2 border-purple-200 bg-purple-50">
                       <CardContent className="p-4">
@@ -1430,10 +1441,10 @@ export function EventOrganizer() {
                           <UserPlus className="h-8 w-8 text-purple-600" />
                           <TrendingUp className="h-5 w-5 text-green-600" />
                         </div>
-                        <div className="text-3xl font-bold text-purple-600">{event.registrations}</div>
+                        <div className="text-3xl font-bold text-purple-600">{event.registrations || 0}</div>
                         <div className="text-sm text-gray-600">Total Registrations</div>
                         <div className="text-xs text-green-600 mt-1">
-                          {((event.registrations / event.maxParticipants) * 100).toFixed(1)}% capacity
+                          {(((event.registrations || 0) / (event.maxParticipants || 1)) * 100).toFixed(1)}% capacity
                         </div>
                       </CardContent>
                     </Card>
@@ -1444,10 +1455,10 @@ export function EventOrganizer() {
                           <Bookmark className="h-8 w-8 text-orange-600" />
                           <TrendingUp className="h-5 w-5 text-green-600" />
                         </div>
-                        <div className="text-3xl font-bold text-orange-600">{event.interested}</div>
+                        <div className="text-3xl font-bold text-orange-600">{event.interested || 0}</div>
                         <div className="text-sm text-gray-600">Interested Users</div>
                         <div className="text-xs text-gray-500 mt-1">
-                          {((event.registrations / event.interested) * 100).toFixed(1)}% conversion
+                          {(((event.registrations || 0) / (event.interested || 1)) * 100).toFixed(1)}% conversion
                         </div>
                       </CardContent>
                     </Card>
@@ -1458,10 +1469,10 @@ export function EventOrganizer() {
                           <Eye className="h-8 w-8 text-blue-600" />
                           <TrendingUp className="h-5 w-5 text-green-600" />
                         </div>
-                        <div className="text-3xl font-bold text-blue-600">{event.views}</div>
+                        <div className="text-3xl font-bold text-blue-600">{event.views || 0}</div>
                         <div className="text-sm text-gray-600">Total Views</div>
                         <div className="text-xs text-gray-500 mt-1">
-                          {((event.registrations / event.views) * 100).toFixed(1)}% CTR
+                          {(((event.registrations || 0) / (event.views || 1)) * 100).toFixed(1)}% CTR
                         </div>
                       </CardContent>
                     </Card>
@@ -1472,18 +1483,16 @@ export function EventOrganizer() {
                           <Target className="h-8 w-8 text-green-600" />
                           <CheckCircle className="h-5 w-5 text-green-600" />
                         </div>
-                        <div className="text-3xl font-bold text-green-600">{event.maxParticipants}</div>
+                        <div className="text-3xl font-bold text-green-600">{event.maxParticipants || 0}</div>
                         <div className="text-sm text-gray-600">Max Capacity</div>
                         <div className="text-xs text-gray-500 mt-1">
-                          {event.maxParticipants - event.registrations} spots left
+                          {(event.maxParticipants || 0) - (event.registrations || 0)} spots left
                         </div>
                       </CardContent>
                     </Card>
                   </div>
 
-                  {/* Charts */}
                   <div className="grid lg:grid-cols-2 gap-6">
-                    {/* Registration Trend */}
                     <Card>
                       <CardHeader>
                         <CardTitle className="text-lg">Registration Trend (Last 7 Days)</CardTitle>
@@ -1493,16 +1502,19 @@ export function EventOrganizer() {
                           <BarChart data={dailyData}>
                             <CartesianGrid strokeDasharray="3 3" />
                             <XAxis dataKey="day" />
-                            <YAxis />
-                            <Tooltip />
-                            <Bar dataKey="registrations" fill="#8B5CF6" name="Registrations" />
-                            <Bar dataKey="views" fill="#3B82F6" name="Views" />
+                            <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={(value) => `${value}`} />
+                            <Tooltip 
+                              contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f1f5f9' }}
+                              itemStyle={{ color: '#f1f5f9' }}
+                            />
+                            <Bar dataKey="registrations" name="Registrations" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="interested" name="Interested" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="views" name="Views" fill="#10b981" radius={[4, 4, 0, 0]} />
                           </BarChart>
                         </ResponsiveContainer>
                       </CardContent>
                     </Card>
 
-                    {/* Traffic Sources */}
                     <Card>
                       <CardHeader>
                         <CardTitle className="text-lg">Traffic Sources</CardTitle>
@@ -1530,7 +1542,6 @@ export function EventOrganizer() {
                     </Card>
                   </div>
 
-                  {/* Engagement Metrics */}
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-lg">Engagement Breakdown</CardTitle>
@@ -1541,13 +1552,13 @@ export function EventOrganizer() {
                           <div className="flex justify-between items-center mb-2">
                             <span className="text-sm font-medium text-gray-700">Registration Rate</span>
                             <span className="text-sm font-bold text-purple-600">
-                              {((event.registrations / event.views) * 100).toFixed(1)}%
+                              {(((event.registrations || 0) / (event.views || 1)) * 100).toFixed(1)}%
                             </span>
                           </div>
                           <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
                             <div
                               className="h-full bg-gradient-to-r from-purple-500 to-purple-600 rounded-full"
-                              style={{ width: `${(event.registrations / event.views) * 100}%` }}
+                              style={{ width: `${((event.registrations || 0) / (event.views || 1)) * 100}%` }}
                             />
                           </div>
                         </div>
@@ -1556,13 +1567,13 @@ export function EventOrganizer() {
                           <div className="flex justify-between items-center mb-2">
                             <span className="text-sm font-medium text-gray-700">Interest to Registration</span>
                             <span className="text-sm font-bold text-orange-600">
-                              {((event.registrations / event.interested) * 100).toFixed(1)}%
+                              {(((event.registrations || 0) / (event.interested || 1)) * 100).toFixed(1)}%
                             </span>
                           </div>
                           <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
                             <div
                               className="h-full bg-gradient-to-r from-orange-500 to-orange-600 rounded-full"
-                              style={{ width: `${(event.registrations / event.interested) * 100}%` }}
+                              style={{ width: `${((event.registrations || 0) / (event.interested || 1)) * 100}%` }}
                             />
                           </div>
                         </div>
@@ -1571,13 +1582,13 @@ export function EventOrganizer() {
                           <div className="flex justify-between items-center mb-2">
                             <span className="text-sm font-medium text-gray-700">Capacity Filled</span>
                             <span className="text-sm font-bold text-green-600">
-                              {((event.registrations / event.maxParticipants) * 100).toFixed(1)}%
+                              {(((event.registrations || 0) / (event.maxParticipants || 1)) * 100).toFixed(1)}%
                             </span>
                           </div>
                           <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
                             <div
                               className="h-full bg-gradient-to-r from-green-500 to-green-600 rounded-full"
-                              style={{ width: `${(event.registrations / event.maxParticipants) * 100}%` }}
+                              style={{ width: `${((event.registrations || 0) / (event.maxParticipants || 1)) * 100}%` }}
                             />
                           </div>
                         </div>
@@ -1585,7 +1596,6 @@ export function EventOrganizer() {
                     </CardContent>
                   </Card>
 
-                  {/* Recent Registrations */}
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-lg">Recent Activity</CardTitle>
@@ -1620,17 +1630,13 @@ export function EventOrganizer() {
         })()}
       </AnimatePresence>
 
-      {/* Participants Modal */}
       <AnimatePresence>
         {showParticipants && (() => {
           const event = events.find(e => e.id === showParticipants);
           if (!event) return null;
 
-          // Load registrations from localStorage
           const allRegistrations = localStorage.getItem('eventRegistrations');
           const registrations = allRegistrations ? JSON.parse(allRegistrations) : [];
-          
-          // Filter registrations for this event
           const eventRegistrations = registrations.filter((reg: any) => reg.eventId === event.id);
 
           return (
@@ -1652,7 +1658,7 @@ export function EventOrganizer() {
                   <div>
                     <h2 className="text-xl font-bold text-gray-900">Participants - {event.title}</h2>
                     <p className="text-sm text-gray-600 mt-1">
-                      {eventRegistrations.length} {eventRegistrations.length === 1 ? 'registration' : 'registrations'} • {event.maxParticipants - eventRegistrations.length} spots remaining
+                      {eventRegistrations.length} {eventRegistrations.length === 1 ? 'registration' : 'registrations'} • {(event.maxParticipants || 0) - eventRegistrations.length} spots remaining
                     </p>
                   </div>
                   <Button variant="outline" size="sm" onClick={() => setShowParticipants(null)}>
@@ -1679,12 +1685,10 @@ export function EventOrganizer() {
                         >
                           <div className="flex items-start justify-between mb-4">
                             <div className="flex items-start gap-4 flex-1">
-                              {/* Avatar */}
                               <div className="h-14 w-14 rounded-full bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-xl flex-shrink-0">
                                 {registration.teamName ? registration.teamName.charAt(0).toUpperCase() : registration.email.charAt(0).toUpperCase()}
                               </div>
 
-                              {/* Main Info */}
                               <div className="flex-1">
                                 <div className="flex items-center gap-3 mb-2">
                                   <h3 className="text-lg font-bold text-gray-900">{registration.teamName || 'Individual'}</h3>
@@ -1700,7 +1704,6 @@ export function EventOrganizer() {
                                   </Badge>
                                 </div>
 
-                                {/* Contact Info */}
                                 <div className="grid md:grid-cols-2 gap-3 mb-3">
                                   <div className="flex items-center gap-2 text-sm text-gray-600">
                                     <Mail className="h-4 w-4 text-blue-600" />
@@ -1729,7 +1732,6 @@ export function EventOrganizer() {
                                   )}
                                 </div>
 
-                                {/* Team Members */}
                                 {registration.memberNames && (
                                   <div className="mb-3">
                                     <div className="text-sm font-medium text-gray-700 mb-2">Team Members:</div>
@@ -1744,7 +1746,6 @@ export function EventOrganizer() {
                                   </div>
                                 )}
 
-                                {/* Why Participate */}
                                 {registration.whyParticipate && (
                                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                                     <div className="text-sm font-medium text-gray-700 mb-1">Why they want to participate:</div>
@@ -1754,7 +1755,6 @@ export function EventOrganizer() {
                               </div>
                             </div>
 
-                            {/* Registration Time */}
                             <div className="text-right flex-shrink-0 ml-4">
                               <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
                                 <Clock className="h-3 w-3" />
@@ -1775,7 +1775,6 @@ export function EventOrganizer() {
                             </div>
                           </div>
 
-                          {/* Actions */}
                           <div className="flex gap-2 pt-3 border-t">
                             <Button 
                               variant="outline" 
@@ -1809,7 +1808,6 @@ export function EventOrganizer() {
                     </div>
                   )}
 
-                  {/* Export Options */}
                   {eventRegistrations.length > 0 && (
                     <div className="mt-6 pt-6 border-t">
                       <div className="flex items-center justify-between">

@@ -221,7 +221,7 @@ export function Match() {
 
     // Use logged-in user or fallback to mock
     const currentUser: UserType = {
-        id: user?.email || mockCurrentUser.id,
+        id: user?.id || mockCurrentUser.id,
         name: user?.name || mockCurrentUser.name,
         email: user?.email || mockCurrentUser.email,
         college: user?.college || mockCurrentUser.college,
@@ -324,19 +324,28 @@ export function Match() {
     };
 
     const handleStartChat = () => {
-        if (celebrationMatch) {
-            localStorage.setItem(
-                'newChatPartner',
-                JSON.stringify({
-                    id: celebrationMatch.id,
-                    name: celebrationMatch.user.name,
-                    image: celebrationMatch.user.profileImage,
-                    role: celebrationMatch.user.college,
-                })
-            );
+        if (!celebrationMatch) return;
+
+        try {
+          const chatPartnerData = {
+            id: celebrationMatch.id || `user-${Date.now()}`,
+            name: celebrationMatch.user.name || 'Unknown',
+            image: celebrationMatch.user.profileImage || `https://ui-avatars.com/api/?name=${encodeURIComponent(celebrationMatch.user.name)}`,
+            role: celebrationMatch.user.college || 'Developer',
+            email: celebrationMatch.user.email || '',
+            skills: celebrationMatch.user.skills || [],
+            interests: celebrationMatch.user.interests || [],
+          };
+
+          console.log('Setting chat partner:', chatPartnerData);
+          localStorage.setItem('newChatPartner', JSON.stringify(chatPartnerData));
+          
+          setCelebrationMatch(null);
+          navigate('/messages');
+        } catch (error) {
+          console.error('Error starting chat:', error);
+          alert('Error starting chat. Please try again.');
         }
-        setCelebrationMatch(null);
-        navigate('/messages');
     };
 
     // Keyboard shortcuts

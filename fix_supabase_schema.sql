@@ -1,4 +1,4 @@
--- Add missing columns to existing profiles table
+-- 1. Fix Profiles table (Safe to run multiple times)
 ALTER TABLE public.profiles 
 ADD COLUMN IF NOT EXISTS college TEXT,
 ADD COLUMN IF NOT EXISTS experience TEXT DEFAULT 'Beginner',
@@ -7,32 +7,28 @@ ADD COLUMN IF NOT EXISTS interests TEXT[] DEFAULT '{}',
 ADD COLUMN IF NOT EXISTS availability TEXT DEFAULT 'Weekends',
 ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
 
--- Create resources table if not exists
-CREATE TABLE IF NOT EXISTS public.resources (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  title TEXT NOT NULL,
-  description TEXT,
-  category TEXT,
-  link TEXT,
-  author_id UUID REFERENCES public.profiles(id),
-  upvotes INTEGER DEFAULT 0,
-  tags TEXT[],
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+-- 2. Drop existing collaboration tables to ensure clean schema (ONLY IF DATA LOSS IS OK FOR THESE TABLES)
+-- These tables were part of the new real-time features migration.
+DROP TABLE IF EXISTS public.messages CASCADE;
+DROP TABLE IF EXISTS public.conversation_members CASCADE;
+DROP TABLE IF EXISTS public.conversations CASCADE;
+DROP TABLE IF EXISTS public.event_registrations CASCADE;
+DROP TABLE IF EXISTS public.events CASCADE;
+DROP TABLE IF EXISTS public.meetings CASCADE;
 
--- Conversations & Messaging
-CREATE TABLE IF NOT EXISTS public.conversations (
+-- 3. Re-create Conversations & Messaging
+CREATE TABLE public.conversations (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS public.conversation_members (
+CREATE TABLE public.conversation_members (
   conversation_id UUID REFERENCES public.conversations(id) ON DELETE CASCADE,
   user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
   PRIMARY KEY (conversation_id, user_id)
 );
 
-CREATE TABLE IF NOT EXISTS public.messages (
+CREATE TABLE public.messages (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   conversation_id UUID REFERENCES public.conversations(id) ON DELETE CASCADE,
   sender_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
@@ -41,8 +37,8 @@ CREATE TABLE IF NOT EXISTS public.messages (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Events & Hackathons
-CREATE TABLE IF NOT EXISTS public.events (
+-- 4. Re-create Events & Hackathons
+CREATE TABLE public.events (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   title TEXT NOT NULL,
   description TEXT,
@@ -58,15 +54,15 @@ CREATE TABLE IF NOT EXISTS public.events (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS public.event_registrations (
+CREATE TABLE public.event_registrations (
   event_id UUID REFERENCES public.events(id) ON DELETE CASCADE,
   user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
   registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   PRIMARY KEY (event_id, user_id)
 );
 
--- Meetings & Video Calls
-CREATE TABLE IF NOT EXISTS public.meetings (
+-- 5. Re-create Meetings & Video Calls
+CREATE TABLE public.meetings (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   title TEXT NOT NULL,
   description TEXT,
@@ -79,9 +75,8 @@ CREATE TABLE IF NOT EXISTS public.meetings (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Enable RLS
+-- 6. Re-enable RLS
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.resources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.conversation_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
@@ -89,7 +84,7 @@ ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.event_registrations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.meetings ENABLE ROW LEVEL SECURITY;
 
--- Policies for profiles
+-- 7. Policies
 DROP POLICY IF EXISTS "Public profiles are viewable by everyone." ON public.profiles;
 CREATE POLICY "Public profiles are viewable by everyone." ON public.profiles FOR SELECT USING (true);
 
@@ -99,14 +94,6 @@ CREATE POLICY "Users can insert their own profile." ON public.profiles FOR INSER
 DROP POLICY IF EXISTS "Users can update own profile." ON public.profiles;
 CREATE POLICY "Users can update own profile." ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
--- Policies for resources
-DROP POLICY IF EXISTS "Resources are viewable by everyone." ON public.resources;
-CREATE POLICY "Resources are viewable by everyone." ON public.resources FOR SELECT USING (true);
-
-DROP POLICY IF EXISTS "Authenticated users can insert resources." ON public.resources;
-CREATE POLICY "Authenticated users can insert resources." ON public.resources FOR INSERT WITH CHECK (auth.role() = 'authenticated');
-
--- Policies for Messaging
 DROP POLICY IF EXISTS "Users can see conversations they are part of" ON public.conversations;
 CREATE POLICY "Users can see conversations they are part of" ON public.conversations
   FOR SELECT USING (
@@ -143,7 +130,6 @@ CREATE POLICY "Users can insert messages into their conversations" ON public.mes
     )
   );
 
--- Policies for Events
 DROP POLICY IF EXISTS "Events are viewable by everyone" ON public.events;
 CREATE POLICY "Events are viewable by everyone" ON public.events FOR SELECT USING (true);
 
@@ -153,50 +139,7 @@ CREATE POLICY "Users can register for events" ON public.event_registrations FOR 
 DROP POLICY IF EXISTS "Users can see their own registrations" ON public.event_registrations;
 CREATE POLICY "Users can see their own registrations" ON public.event_registrations FOR SELECT USING (auth.uid() = user_id);
 
--- Policies for Meetings
-DROP POLICY IF EXISTS "Meetings are viewable by host" ON public.meetings;
-CREATE POLICY "Meetings are viewable by host" ON public.meetings
-  FOR SELECT USING (auth.uid() = host_id);
+-- 8. Finalize
+-- Note: Profiles must be created through Supabase Auth to maintain referential integrity.
 
--- Function to increment upvotes
-CREATE OR REPLACE FUNCTION public.increment_upvotes(resource_id UUID)
-RETURNS void AS $$
-BEGIN
-  UPDATE public.resources
-  SET upvotes = upvotes + 1
-  WHERE id = resource_id;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Robust handle_new_user with fallback for NOT NULL username constraint
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS trigger AS $$
-DECLARE
-  generated_username TEXT;
-BEGIN
-  -- Generate a fallback username from email if not provided
-  generated_username := COALESCE(
-    new.raw_user_meta_data->>'username', 
-    split_part(new.email, '@', 1) || '_' || substr(md5(random()::text), 1, 4)
-  );
-
-  INSERT INTO public.profiles (id, username, full_name, email, avatar_url)
-  VALUES (
-    new.id, 
-    generated_username,
-    COALESCE(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''), 
-    new.email, 
-    COALESCE(new.raw_user_meta_data->>'avatar_url', new.raw_user_meta_data->>'picture', '')
-  )
-  ON CONFLICT (id) DO UPDATE 
-  SET full_name = EXCLUDED.full_name, 
-      avatar_url = EXCLUDED.avatar_url;
-  RETURN new;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Trigger to call handle_new_user on signup
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
