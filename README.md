@@ -374,7 +374,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 👥 Authors
 
-- **Rangesh Gupta, Aditya Agrahari, Farhan Ansari, Ansh Jaiswal.** - *Initial work* - [https://github.com/anshjaiswal2911-tech/find-teammates-website]
+- **Rangesh Gupta, Ansh Jaiswal.** - *Initial work* - [https://github.com/anshjaiswal2911-tech/find-teammates]
 ---
 
 ## 🙏 Acknowledgments
