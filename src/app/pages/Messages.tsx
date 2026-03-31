@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useLocation } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Search,
@@ -98,113 +98,20 @@ export function Messages() {
     };
   }, [selectedConversation]);
 
-  // Handle new chat partner from localStorage
+  // Handle conversation selection from URL
+  const location = useLocation();
   useEffect(() => {
-    const handleNewPartner = async () => {
-      const newPartnerData = localStorage.getItem('newChatPartner');
-      if (!newPartnerData || !user?.id) return;
-
-      try {
-        const partner = JSON.parse(newPartnerData);
-        console.log('Starting new chat with:', partner);
-
-        // Check if conversation already exists
-        const existingConv = conversations.find(c => 
-          c.participants?.some(p => p.id === partner.id)
-        );
-
-        if (existingConv) {
-          console.log('Using existing conversation:', existingConv.id);
-          setSelectedConversation(existingConv);
-          setMobileView('chat');
-          localStorage.removeItem('newChatPartner');
-          return;
-        }
-
-        // Create new conversation
-        const { data: conv, error: convError } = await supabase
-          .from('conversations')
-          .insert({})
-          .select()
-          .single();
-
-        if (convError) {
-          console.error('Error creating conversation:', convError);
-          // Fallback: Create a local conversation object
-          const localConversation = {
-            id: `local-${Date.now()}`,
-            created_at: new Date().toISOString(),
-            participants: [
-              {
-                id: user.id,
-                name: user.name || 'You',
-                email: user.email,
-                profileImage: user.profileImage,
-                skills: [],
-                interests: [],
-                college: '',
-                experience: 'Beginner' as const,
-                availability: 'Weekends' as const,
-              },
-              {
-                id: partner.id,
-                name: partner.name,
-                email: '',
-                profileImage: partner.image,
-                skills: [],
-                interests: [],
-                college: partner.role,
-                experience: 'Beginner' as const,
-                availability: 'Weekends' as const,
-              },
-            ],
-            messages: [],
-          };
-          setSelectedConversation(localConversation as any);
-          setMobileView('chat');
-          localStorage.removeItem('newChatPartner');
-          return;
-        }
-
-        if (!conv) {
-          console.warn('No conversation returned');
-          return;
-        }
-
-        // Add conversation members
-        const { error: memberError } = await supabase
-          .from('conversation_members')
-          .insert([
-            { conversation_id: conv.id, user_id: user.id },
-            { conversation_id: conv.id, user_id: partner.id },
-          ]);
-
-        if (memberError) {
-          console.error('Error adding members:', memberError);
-        }
-
-        // Refresh conversations list
-        const updatedConversations = await dbService.getConversations();
-        setConversations(updatedConversations);
-
-        // Find and select the new conversation
-        const newConv = updatedConversations.find(c => c.id === conv.id);
-        if (newConv) {
-          setSelectedConversation(newConv);
-          setMobileView('chat');
-        }
-
-        localStorage.removeItem('newChatPartner');
-      } catch (e) {
-        console.error('Error initiating new chat:', e);
-        alert('Could not start chat. Please try again.');
+    const params = new URLSearchParams(location.search);
+    const convId = params.get('convId');
+    
+    if (convId && conversations.length > 0) {
+      const conv = conversations.find(c => c.id === convId);
+      if (conv) {
+        setSelectedConversation(conv);
+        setMobileView('chat');
       }
-    };
-
-    if (user?.id && !loading) {
-      handleNewPartner();
     }
-  }, [user?.id, loading]);
+  }, [location.search, conversations]);
 
   const handleSendMessage = async () => {
     if (!messageText.trim() || !selectedConversation || !user) return;

@@ -181,6 +181,70 @@ export const dbService = {
     return conversations;
   },
 
+  async getOrCreateConversation(partnerId: string): Promise<string | null> {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return null;
+
+    // 1. Check if a direct conversation already exists between these two users
+    const { data: existingMembers, error: membersError } = await supabase
+      .from('conversation_members')
+      .select('conversation_id')
+      .eq('user_id', session.user.id);
+
+    if (membersError) {
+      console.error('Error fetching members for existing check:', membersError);
+    }
+
+    if (existingMembers && existingMembers.length > 0) {
+      const conversationIds = existingMembers.map(m => m.conversation_id);
+      
+      // Look for a conversation that ALSO has the partner
+      const { data: partnerInConv, error: partnerError } = await supabase
+        .from('conversation_members')
+        .select('conversation_id')
+        .in('conversation_id', conversationIds)
+        .eq('user_id', partnerId)
+        .maybeSingle();
+
+      if (partnerError) {
+        console.error('Error checking partner in existing conversations:', partnerError);
+      }
+
+      if (partnerInConv) {
+        console.log('Found existing conversation:', partnerInConv.conversation_id);
+        return partnerInConv.conversation_id;
+      }
+    }
+
+    // 2. Create a new conversation if not found
+    console.log('Creating new conversation for', session.user.id, 'and', partnerId);
+    const { data: conv, error: convError } = await supabase
+      .from('conversations')
+      .insert({})
+      .select()
+      .single();
+
+    if (convError || !conv) {
+      console.error('Error creating conversation:', convError);
+      return null;
+    }
+
+    // 3. Add both members
+    const { error: memberError } = await supabase
+      .from('conversation_members')
+      .insert([
+        { conversation_id: conv.id, user_id: session.user.id },
+        { conversation_id: conv.id, user_id: partnerId },
+      ]);
+
+    if (memberError) {
+      console.error('Error adding conversation members:', memberError);
+      return null;
+    }
+
+    return conv.id;
+  },
+
   async getMessages(conversationId: string): Promise<Message[]> {
     const { data, error } = await supabase
       .from('messages')

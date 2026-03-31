@@ -323,25 +323,19 @@ export function Match() {
         setSelectedSkill(null);
     };
 
-    const handleStartChat = () => {
-        if (!celebrationMatch) return;
+    const handleStartChat = async () => {
+        if (!celebrationMatch || !user) return;
 
         try {
-          const chatPartnerData = {
-            id: celebrationMatch.id || `user-${Date.now()}`,
-            name: celebrationMatch.user.name || 'Unknown',
-            image: celebrationMatch.user.profileImage || `https://ui-avatars.com/api/?name=${encodeURIComponent(celebrationMatch.user.name)}`,
-            role: celebrationMatch.user.college || 'Developer',
-            email: celebrationMatch.user.email || '',
-            skills: celebrationMatch.user.skills || [],
-            interests: celebrationMatch.user.interests || [],
-          };
-
-          console.log('Setting chat partner:', chatPartnerData);
-          localStorage.setItem('newChatPartner', JSON.stringify(chatPartnerData));
+          const partnerId = celebrationMatch.id;
+          const conversationId = await dbService.getOrCreateConversation(partnerId);
           
-          setCelebrationMatch(null);
-          navigate('/messages');
+          if (conversationId) {
+            setCelebrationMatch(null);
+            navigate(`/messages?convId=${conversationId}`);
+          } else {
+            throw new Error("Could not create conversation");
+          }
         } catch (error) {
           console.error('Error starting chat:', error);
           alert('Error starting chat. Please try again.');
@@ -477,9 +471,11 @@ export function Match() {
                                             <motion.div
                                                 key={m.id}
                                                 whileHover={{ scale: 1.05 }}
-                                                onClick={() => {
-                                                    localStorage.setItem('newChatPartner', JSON.stringify({ id: m.id, name: m.user.name, image: m.user.profileImage, role: m.user.college }));
-                                                    navigate('/messages');
+                                                onClick={async () => {
+                                                    const conversationId = await dbService.getOrCreateConversation(m.id);
+                                                    if (conversationId) {
+                                                      navigate(`/messages?convId=${conversationId}`);
+                                                    }
                                                 }}
                                                 className="flex-shrink-0 flex flex-col items-center gap-1.5 cursor-pointer"
                                             >
